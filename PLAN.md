@@ -1,5 +1,19 @@
 # Verbatim - Product and Implementation Plan
 
+## Implementation status (v0.1)
+
+The runnable v0.1 release implements the complete local workflow described by
+the core promise: project controls, digital and printed-scan ingestion, Codex
+translation/OCR/visual review, deterministic QA, same-page PDF composition,
+revision chat, approval-gated translation memory, token reporting, and export.
+
+The plan remains intentionally broader than v0.1. Automatic locale detection,
+targeted layout-only regeneration, cancellation/ETA controls, per-page
+checkpoints across a process restart, and additional script-shaping suites are
+the next hardening track rather than hidden claims about the current build.
+The exact verified behavior and release boundaries are recorded in
+[README.md](README.md) and [docs/VALIDATION.md](docs/VALIDATION.md).
+
 ## 1. Product summary
 
 Verbatim is a local, project-aware PDF translation workstation.

@@ -90,11 +90,17 @@ public class TranslationMemoryService {
             field(name("source_embedding")),
             DSL.val(vectorLiteral(embeddings.embed(sourceText)))
         );
+        Field<Double> similarity = field(
+            "1.0 - ({0} <=> {1}::vector)",
+            Double.class,
+            field(name("source_embedding")),
+            DSL.val(vectorLiteral(embeddings.embed(sourceText)))
+        );
         return database.select(
                 field(name("id"), UUID.class),
                 field(name("source_text"), String.class),
                 field(name("target_text"), String.class),
-                DSL.one().minus(distance).as("similarity")
+                similarity.as("similarity")
             )
             .from(table(name("translation_memory_entry")))
             .where(field(name("project_id"), UUID.class).eq(projectId))

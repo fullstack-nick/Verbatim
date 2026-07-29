@@ -126,6 +126,7 @@ const stageLabels: Record<string, string> = {
   TRANSLATING: "Translating with Codex",
   DETERMINISTIC_REVIEW: "Checking terms and placeholders",
   COMPOSING_PDF: "Rebuilding the PDF",
+  VISUAL_REVIEW: "Comparing source and translated pages",
   FINALIZING: "Finishing the review",
   QA_PASSED: "Ready for approval",
   QA_FLAGGED: "Ready with findings",

@@ -51,6 +51,9 @@ verbatim:
     timeout-seconds: ${VERBATIM_CODEX_TIMEOUT_SECONDS:300}
     translation-schema: ${VERBATIM_TRANSLATION_SCHEMA:../schemas/translation-result.schema.json}
     ocr-schema: ${VERBATIM_OCR_SCHEMA:../schemas/ocr-result.schema.json}
+    visual-review-schema: ${VERBATIM_VISUAL_REVIEW_SCHEMA:../schemas/visual-review-result.schema.json}
+    visual-review-enabled: ${VERBATIM_VISUAL_REVIEW_ENABLED:true}
+    visual-review-max-pages: ${VERBATIM_VISUAL_REVIEW_MAX_PAGES:20}
   pdf:
     render-dpi: 160
     minimum-font-scale: 0.78

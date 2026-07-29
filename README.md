@@ -20,6 +20,7 @@ storage.
 - Placeholder and simple HTML parity checks.
 - Fresh, bounded Codex CLI invocations with JSON Schema output.
 - Codex vision OCR for high-quality scanned document pages.
+- Structured Codex source/target page comparison after PDF composition.
 - Page-preserving PDF composition with structured overflow findings.
 - PostgreSQL job queue using `FOR UPDATE SKIP LOCKED`.
 - Idempotent start commands, bounded retries, stale-result protection, and

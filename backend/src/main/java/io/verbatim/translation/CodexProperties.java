@@ -9,6 +9,9 @@ public record CodexProperties(
     boolean allowFallback,
     int timeoutSeconds,
     String translationSchema,
-    String ocrSchema
+    String ocrSchema,
+    String visualReviewSchema,
+    boolean visualReviewEnabled,
+    int visualReviewMaxPages
 ) {
 }

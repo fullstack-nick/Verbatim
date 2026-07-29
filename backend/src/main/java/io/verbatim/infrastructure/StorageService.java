@@ -91,6 +91,20 @@ public class StorageService {
         }
     }
 
+    public Path revisionRenderDirectory(UUID revisionId) {
+        Path directory = resolve(Path.of("renders", revisionId.toString(), "target"));
+        try {
+            Files.createDirectories(directory);
+            return directory;
+        } catch (IOException exception) {
+            throw new ApiException(
+                HttpStatus.INTERNAL_SERVER_ERROR,
+                "STORAGE_WRITE_FAILED",
+                "The revision render directory could not be created."
+            );
+        }
+    }
+
     public Path resolve(String relativePath) {
         return resolve(Path.of(relativePath));
     }

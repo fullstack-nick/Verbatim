@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["pass", "findings"],
+  "properties": {
+    "pass": { "type": "boolean" },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "severity", "message"],
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "TEXT_CLIPPED",
+              "TEXT_OVERLAP",
+              "SOURCE_TEXT_GHOST",
+              "BACKGROUND_DAMAGE",
+              "HIERARCHY_DRIFT",
+              "TABLE_DAMAGE",
+              "IMAGE_OR_GRAPHIC_DRIFT",
+              "SPACING_DRIFT",
+              "UNREADABLE_TEXT",
+              "OTHER_LAYOUT_DRIFT"
+            ]
+          },
+          "severity": { "type": "string", "enum": ["ERROR", "WARNING"] },
+          "message": { "type": "string" }
+        }
+      }
+    }
+  }
+}

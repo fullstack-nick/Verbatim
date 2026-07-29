@@ -8,6 +8,7 @@ import io.verbatim.common.ApiException;
 import io.verbatim.document.PdfCompositionService;
 import io.verbatim.document.PdfCompositionService.CompositionResult;
 import io.verbatim.document.PdfCompositionService.CompositionSegment;
+import io.verbatim.document.PdfRenderService;
 import io.verbatim.infrastructure.StorageService;
 import io.verbatim.project.ProjectModels.RuleInput;
 import io.verbatim.project.ProjectModels.UpdateRulesRequest;
@@ -24,6 +25,8 @@ import io.verbatim.translation.TranslationGateway;
 import io.verbatim.translation.CodexVisionOcrClient;
 import io.verbatim.translation.CodexVisionOcrClient.OcrRegion;
 import io.verbatim.translation.CodexVisionOcrClient.OcrResult;
+import io.verbatim.translation.CodexVisualReviewClient;
+import io.verbatim.translation.CodexVisualReviewClient.VisualReviewResult;
 import io.verbatim.workflow.WorkflowModels.AddInstructionRequest;
 import io.verbatim.workflow.WorkflowModels.FindingView;
 import io.verbatim.workflow.WorkflowModels.InstructionView;
@@ -63,6 +66,8 @@ public class WorkflowService {
     private final TerminologyCacheService termCache;
     private final TranslationGateway translation;
     private final CodexVisionOcrClient ocr;
+    private final CodexVisualReviewClient visualReview;
+    private final PdfRenderService pdfRenderer;
     private final TranslationMemoryService translationMemory;
     private final DeterministicReviewService review;
     private final PdfCompositionService compositor;
@@ -76,6 +81,8 @@ public class WorkflowService {
         TerminologyCacheService termCache,
         TranslationGateway translation,
         CodexVisionOcrClient ocr,
+        CodexVisualReviewClient visualReview,
+        PdfRenderService pdfRenderer,
         TranslationMemoryService translationMemory,
         DeterministicReviewService review,
         PdfCompositionService compositor,
@@ -88,6 +95,8 @@ public class WorkflowService {
         this.termCache = termCache;
         this.translation = translation;
         this.ocr = ocr;
+        this.visualReview = visualReview;
+        this.pdfRenderer = pdfRenderer;
         this.translationMemory = translationMemory;
         this.review = review;
         this.compositor = compositor;
@@ -175,7 +184,7 @@ public class WorkflowService {
                 "TRANSLATE_DOCUMENT",
                 "QUEUED",
                 "QUEUED",
-                6,
+                7,
                 expectedVersion,
                 ruleVersion
             )
@@ -459,8 +468,52 @@ public class WorkflowService {
             )).toList()
         );
         findings.addAll(composition.findings());
-        saveLayoutFindings(job.revisionId(), composition.findings());
-        updateProgress(job.id(), "FINALIZING", 5);
+        List<Finding> layoutFindings = new ArrayList<>(composition.findings());
+
+        updateProgress(job.id(), "VISUAL_REVIEW", 5);
+        List<Path> targetRenders = pdfRenderer.render(
+            output,
+            storage.revisionRenderDirectory(job.revisionId())
+        );
+        List<PageRender> sourceRenders = loadPageRenders(job.documentId());
+        int pagesToReview = Math.min(
+            visualReview.maxPages(),
+            Math.min(sourceRenders.size(), targetRenders.size())
+        );
+        for (int index = 0; index < pagesToReview; index++) {
+            PageRender sourceRender = sourceRenders.get(index);
+            try {
+                VisualReviewResult visual = visualReview.review(
+                    storage.resolve(sourceRender.path()),
+                    targetRenders.get(index)
+                );
+                saveVisualInvocation(job, sourceRender.pageNumber(), visual);
+                for (var item : visual.findings()) {
+                    layoutFindings.add(new Finding(
+                        item.code(),
+                        item.severity(),
+                        item.message(),
+                        sourceRender.pageNumber(),
+                        null
+                    ));
+                }
+            } catch (RuntimeException failure) {
+                layoutFindings.add(new Finding(
+                    "VISUAL_REVIEW_UNAVAILABLE",
+                    "WARNING",
+                    "Codex visual comparison was unavailable: " + abbreviate(
+                        failure.getMessage() == null ? "unknown provider failure" : failure.getMessage()
+                    ),
+                    sourceRender.pageNumber(),
+                    null
+                ));
+            }
+        }
+        findings.addAll(layoutFindings.stream()
+            .filter(item -> !composition.findings().contains(item))
+            .toList());
+        saveLayoutFindings(job.revisionId(), layoutFindings);
+        updateProgress(job.id(), "FINALIZING", 6);
 
         String result = findings.stream().anyMatch(item -> "ERROR".equals(item.severity()))
             ? "QA_FLAGGED"
@@ -482,7 +535,7 @@ public class WorkflowService {
         database.update(table(name("workflow_job")))
             .set(field(name("state")), "COMPLETED")
             .set(field(name("current_stage")), result)
-            .set(field(name("progress_current")), 6)
+            .set(field(name("progress_current")), 7)
             .set(field(name("completed_at")), OffsetDateTime.now())
             .where(field(name("id"), UUID.class).eq(job.id()))
             .execute();
@@ -712,6 +765,59 @@ public class WorkflowService {
                 "COMPLETED"
             )
             .execute();
+    }
+
+    private void saveVisualInvocation(
+        JobClaim job,
+        int pageNumber,
+        VisualReviewResult result
+    ) {
+        database.insertInto(table(name("ai_invocation")))
+            .columns(
+                field(name("id")),
+                field(name("document_id")),
+                field(name("revision_id")),
+                field(name("stage")),
+                field(name("batch_number")),
+                field(name("provider_thread_id")),
+                field(name("context_hash")),
+                field(name("input_tokens")),
+                field(name("cached_input_tokens")),
+                field(name("output_tokens")),
+                field(name("reasoning_output_tokens")),
+                field(name("duration_ms")),
+                field(name("state"))
+            )
+            .values(
+                UUID.randomUUID(),
+                job.documentId(),
+                job.revisionId(),
+                "VISUAL_REVIEW:CODEX_VISION",
+                pageNumber,
+                result.providerThreadId(),
+                Integer.toHexString(result.findings().hashCode()),
+                result.usage().inputTokens(),
+                result.usage().cachedInputTokens(),
+                result.usage().outputTokens(),
+                result.usage().reasoningTokens(),
+                result.durationMillis(),
+                result.pass() ? "COMPLETED" : "FLAGGED"
+            )
+            .execute();
+    }
+
+    private List<PageRender> loadPageRenders(UUID documentId) {
+        return database.select(
+                field(name("page_number"), Integer.class),
+                field(name("render_path"), String.class)
+            )
+            .from(table(name("document_page")))
+            .where(field(name("document_id"), UUID.class).eq(documentId))
+            .orderBy(field(name("page_number")))
+            .fetch(record -> new PageRender(
+                record.get(0, Integer.class),
+                record.get(1, String.class)
+            ));
     }
 
     private BigDecimal scaled(BigDecimal dimension, double fraction) {
@@ -1000,5 +1106,8 @@ public class WorkflowService {
         BigDecimal height,
         String renderPath
     ) {
+    }
+
+    private record PageRender(int pageNumber, String path) {
     }
 }

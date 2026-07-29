@@ -63,6 +63,72 @@ public class PdfCompositionService {
                 BufferedImage preview = pageSegments.isEmpty()
                     ? null
                     : ImageIO.read(pageSegments.getFirst().sourceRender().toFile());
+                List<RenderItem> renderItems = new ArrayList<>();
+                for (CompositionSegment segment : pageSegments) {
+                    if (segment.targetText() == null || segment.targetText().isBlank()) {
+                        continue;
+                    }
+                    JsonNode box = objectMapper.readTree(segment.boundingBoxJson());
+                    JsonNode style = objectMapper.readTree(segment.styleJson());
+                    float x = (float) box.path("x").asDouble();
+                    float top = (float) box.path("y").asDouble();
+                    float width = Math.max(2, (float) box.path("width").asDouble());
+                    float height = Math.max(2, (float) box.path("height").asDouble());
+                    float sourceSize = Math.max(6, (float) style.path("fontSize").asDouble(10));
+                    boolean ocr = style.path("ocr").asBoolean(false);
+                    PDFont font = style.path("bold").asBoolean(false) ? bold : regular;
+                    String target = printable(segment.targetText());
+                    float availableWidth = ocr ? width * 1.08f : width;
+                    float scale = Math.min(
+                        1f,
+                        availableWidth / Math.max(1f, textWidth(font, sourceSize, target))
+                    );
+                    float minimum = minimumFontScale.floatValue();
+                    if (scale < minimum) {
+                        findings.add(new Finding(
+                            "TEXT_OVERFLOW",
+                            "ERROR",
+                            "Translated text does not fit at the minimum font scale.",
+                            segment.pageNumber(),
+                            segment.segmentId(),
+                            Map.of(
+                                "requiredScale", round(scale),
+                                "minimumScale", minimumFontScale,
+                                "boxWidth", width
+                            )
+                        ));
+                        scale = minimum;
+                    }
+                    float fontSize = sourceSize * scale;
+                    Color background = sampleColor(preview, page, x, top, width, height, true);
+                    Color foreground = sampleColor(preview, page, x, top, width, height, false);
+                    if (luminance(background) < 125) {
+                        foreground = Color.WHITE;
+                    }
+                    float coverTop = Math.max(0, top - sourceSize * (ocr ? 0.45f : 0.25f));
+                    float coverHeight = height + sourceSize * (ocr ? 1.0f : 0.60f);
+                    float coverX = Math.max(0, x - (ocr ? sourceSize * 0.25f : 1.5f));
+                    float coverWidth = ocr
+                        ? Math.min(page.getMediaBox().getWidth() - coverX, width * 1.12f + sourceSize * 0.5f)
+                        : width + 3;
+                    renderItems.add(new RenderItem(
+                        target,
+                        font,
+                        fontSize,
+                        foreground,
+                        background,
+                        x,
+                        page.getMediaBox().getHeight() - top - (ocr ? sourceSize * 0.85f : height),
+                        coverX,
+                        page.getMediaBox().getHeight() - coverTop - coverHeight,
+                        coverWidth,
+                        coverHeight
+                    ));
+                }
+
+                // Erase every source region before drawing any translated text. OCR boxes can
+                // overlap slightly; interleaving erase and draw would let a later box clip an
+                // earlier translated line.
                 try (PDPageContentStream content = new PDPageContentStream(
                     pdf,
                     page,
@@ -70,67 +136,22 @@ public class PdfCompositionService {
                     true,
                     true
                 )) {
-                    for (CompositionSegment segment : pageSegments) {
-                        if (segment.targetText() == null || segment.targetText().isBlank()) {
-                            continue;
-                        }
-                        JsonNode box = objectMapper.readTree(segment.boundingBoxJson());
-                        JsonNode style = objectMapper.readTree(segment.styleJson());
-                        float x = (float) box.path("x").asDouble();
-                        float top = (float) box.path("y").asDouble();
-                        float width = Math.max(2, (float) box.path("width").asDouble());
-                        float height = Math.max(2, (float) box.path("height").asDouble());
-                        float sourceSize = Math.max(6, (float) style.path("fontSize").asDouble(10));
-                        boolean ocr = style.path("ocr").asBoolean(false);
-                        PDFont font = style.path("bold").asBoolean(false) ? bold : regular;
-                        String target = printable(segment.targetText());
-                        float availableWidth = ocr ? width * 1.08f : width;
-                        float scale = Math.min(
-                            1f,
-                            availableWidth / Math.max(1f, textWidth(font, sourceSize, target))
+                    for (RenderItem item : renderItems) {
+                        content.setNonStrokingColor(item.background());
+                        content.addRect(
+                            item.coverX(),
+                            item.coverY(),
+                            item.coverWidth(),
+                            item.coverHeight()
                         );
-                        float minimum = minimumFontScale.floatValue();
-                        if (scale < minimum) {
-                            findings.add(new Finding(
-                                "TEXT_OVERFLOW",
-                                "ERROR",
-                                "Translated text does not fit at the minimum font scale.",
-                                segment.pageNumber(),
-                                segment.segmentId(),
-                                Map.of(
-                                    "requiredScale", round(scale),
-                                    "minimumScale", minimumFontScale,
-                                    "boxWidth", width
-                                )
-                            ));
-                            scale = minimum;
-                        }
-                        float fontSize = sourceSize * scale;
-                        Color background = sampleColor(preview, page, x, top, width, height, true);
-                        Color foreground = sampleColor(preview, page, x, top, width, height, false);
-                        if (luminance(background) < 125) {
-                            foreground = Color.WHITE;
-                        }
-                        float coverTop = Math.max(0, top - sourceSize * (ocr ? 0.45f : 0.25f));
-                        float coverHeight = height + sourceSize * (ocr ? 1.0f : 0.60f);
-                        float coverX = Math.max(0, x - (ocr ? sourceSize * 0.25f : 1.5f));
-                        float coverWidth = ocr
-                            ? Math.min(page.getMediaBox().getWidth() - coverX, width * 1.12f + sourceSize * 0.5f)
-                            : width + 3;
-                        float pdfY = page.getMediaBox().getHeight() - coverTop - coverHeight;
-
-                        content.setNonStrokingColor(background);
-                        content.addRect(coverX, pdfY, coverWidth, coverHeight);
                         content.fill();
-
+                    }
+                    for (RenderItem item : renderItems) {
                         content.beginText();
-                        content.setNonStrokingColor(foreground);
-                        content.setFont(font, fontSize);
-                        content.newLineAtOffset(
-                            x,
-                            page.getMediaBox().getHeight() - top - (ocr ? sourceSize * 0.85f : height)
-                        );
-                        content.showText(target);
+                        content.setNonStrokingColor(item.foreground());
+                        content.setFont(item.font(), item.fontSize());
+                        content.newLineAtOffset(item.textX(), item.textY());
+                        content.showText(item.target());
                         content.endText();
                     }
                 }
@@ -279,5 +300,20 @@ public class PdfCompositionService {
     }
 
     public record CompositionResult(Path output, List<Finding> findings) {
+    }
+
+    private record RenderItem(
+        String target,
+        PDFont font,
+        float fontSize,
+        Color foreground,
+        Color background,
+        float textX,
+        float textY,
+        float coverX,
+        float coverY,
+        float coverWidth,
+        float coverHeight
+    ) {
     }
 }
