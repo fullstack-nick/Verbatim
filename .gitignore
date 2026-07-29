@@ -1,0 +1,40 @@
+# IDE and operating-system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local application data and secrets
+.env
+.env.*
+!.env.example
+.verbatim-data/
+tmp/
+output/
+
+# Java
+target/
+build/
+.gradle/
+*.class
+*.log
+
+# Frontend
+node_modules/
+frontend/node_modules/
+frontend/dist/
+coverage/
+
+# Python and local tooling
+.venv/
+__pycache__/
+*.py[cod]
+.tooling/
+
+# Generated and downloaded datasets
+datasets/
+
+# Playwright artifacts
+output/playwright/
+playwright-report/
+test-results/
