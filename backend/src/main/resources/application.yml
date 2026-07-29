@@ -50,6 +50,7 @@ verbatim:
     allow-fallback: ${VERBATIM_CODEX_ALLOW_FALLBACK:true}
     timeout-seconds: ${VERBATIM_CODEX_TIMEOUT_SECONDS:300}
     translation-schema: ${VERBATIM_TRANSLATION_SCHEMA:../schemas/translation-result.schema.json}
+    ocr-schema: ${VERBATIM_OCR_SCHEMA:../schemas/ocr-result.schema.json}
   pdf:
     render-dpi: 160
     minimum-font-scale: 0.78

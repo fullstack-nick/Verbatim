@@ -83,7 +83,7 @@ public class WorkflowController {
     ) {
         return ResponseEntity.ok()
             .contentType(MediaType.APPLICATION_PDF)
-            .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"verbatim-translation.pdf\"")
+            .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"verbatim-translation.pdf\"")
             .cacheControl(CacheControl.noCache())
             .body(workflows.download(projectId, documentId, revisionId));
     }

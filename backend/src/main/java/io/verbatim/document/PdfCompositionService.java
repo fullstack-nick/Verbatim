@@ -81,9 +81,14 @@ public class PdfCompositionService {
                         float width = Math.max(2, (float) box.path("width").asDouble());
                         float height = Math.max(2, (float) box.path("height").asDouble());
                         float sourceSize = Math.max(6, (float) style.path("fontSize").asDouble(10));
+                        boolean ocr = style.path("ocr").asBoolean(false);
                         PDFont font = style.path("bold").asBoolean(false) ? bold : regular;
                         String target = printable(segment.targetText());
-                        float scale = Math.min(1f, width / Math.max(1f, textWidth(font, sourceSize, target)));
+                        float availableWidth = ocr ? width * 1.08f : width;
+                        float scale = Math.min(
+                            1f,
+                            availableWidth / Math.max(1f, textWidth(font, sourceSize, target))
+                        );
                         float minimum = minimumFontScale.floatValue();
                         if (scale < minimum) {
                             findings.add(new Finding(
@@ -103,12 +108,19 @@ public class PdfCompositionService {
                         float fontSize = sourceSize * scale;
                         Color background = sampleColor(preview, page, x, top, width, height, true);
                         Color foreground = sampleColor(preview, page, x, top, width, height, false);
-                        float coverTop = Math.max(0, top - sourceSize * 0.25f);
-                        float coverHeight = height + sourceSize * 0.60f;
+                        if (luminance(background) < 125) {
+                            foreground = Color.WHITE;
+                        }
+                        float coverTop = Math.max(0, top - sourceSize * (ocr ? 0.45f : 0.25f));
+                        float coverHeight = height + sourceSize * (ocr ? 1.0f : 0.60f);
+                        float coverX = Math.max(0, x - (ocr ? sourceSize * 0.25f : 1.5f));
+                        float coverWidth = ocr
+                            ? Math.min(page.getMediaBox().getWidth() - coverX, width * 1.12f + sourceSize * 0.5f)
+                            : width + 3;
                         float pdfY = page.getMediaBox().getHeight() - coverTop - coverHeight;
 
                         content.setNonStrokingColor(background);
-                        content.addRect(Math.max(0, x - 1.5f), pdfY, width + 3, coverHeight);
+                        content.addRect(coverX, pdfY, coverWidth, coverHeight);
                         content.fill();
 
                         content.beginText();
@@ -116,7 +128,7 @@ public class PdfCompositionService {
                         content.setFont(font, fontSize);
                         content.newLineAtOffset(
                             x,
-                            page.getMediaBox().getHeight() - top - height
+                            page.getMediaBox().getHeight() - top - (ocr ? sourceSize * 0.85f : height)
                         );
                         content.showText(target);
                         content.endText();
@@ -166,6 +178,9 @@ public class PdfCompositionService {
         int right = clamp(Math.round((x + width) * scaleX), left + 1, image.getWidth());
         int y1 = clamp(Math.round(top * scaleY), 0, image.getHeight() - 1);
         int y2 = clamp(Math.round((top + height) * scaleY), y1 + 1, image.getHeight());
+        if (background) {
+            return sampleBorderBackground(image, left, right, y1, y2);
+        }
         List<Integer> red = new ArrayList<>();
         List<Integer> green = new ArrayList<>();
         List<Integer> blue = new ArrayList<>();
@@ -182,13 +197,6 @@ public class PdfCompositionService {
         if (red.isEmpty()) {
             return background ? Color.WHITE : Color.BLACK;
         }
-        if (background) {
-            red.sort(Integer::compareTo);
-            green.sort(Integer::compareTo);
-            blue.sort(Integer::compareTo);
-            int middle = red.size() / 2;
-            return new Color(red.get(middle), green.get(middle), blue.get(middle));
-        }
         List<Color> colors = new ArrayList<>();
         for (int index = 0; index < red.size(); index++) {
             colors.add(new Color(red.get(index), green.get(index), blue.get(index)));
@@ -204,6 +212,47 @@ public class PdfCompositionService {
             totalBlue += colors.get(index).getBlue();
         }
         return new Color(totalRed / sampleCount, totalGreen / sampleCount, totalBlue / sampleCount);
+    }
+
+    private Color sampleBorderBackground(
+        BufferedImage image,
+        int left,
+        int right,
+        int top,
+        int bottom
+    ) {
+        List<Integer> red = new ArrayList<>();
+        List<Integer> green = new ArrayList<>();
+        List<Integer> blue = new ArrayList<>();
+        int above = clamp(top - 3, 0, image.getHeight() - 1);
+        int below = clamp(bottom + 3, 0, image.getHeight() - 1);
+        int step = Math.max(1, (right - left) / 24);
+        for (int x = left; x < right; x += step) {
+            addColor(image, x, above, red, green, blue);
+            addColor(image, x, below, red, green, blue);
+        }
+        int middleY = clamp((top + bottom) / 2, 0, image.getHeight() - 1);
+        addColor(image, clamp(left - 3, 0, image.getWidth() - 1), middleY, red, green, blue);
+        addColor(image, clamp(right + 3, 0, image.getWidth() - 1), middleY, red, green, blue);
+        red.sort(Integer::compareTo);
+        green.sort(Integer::compareTo);
+        blue.sort(Integer::compareTo);
+        int middle = red.size() / 2;
+        return new Color(red.get(middle), green.get(middle), blue.get(middle));
+    }
+
+    private void addColor(
+        BufferedImage image,
+        int x,
+        int y,
+        List<Integer> red,
+        List<Integer> green,
+        List<Integer> blue
+    ) {
+        Color color = new Color(image.getRGB(x, y));
+        red.add(color.getRed());
+        green.add(color.getGreen());
+        blue.add(color.getBlue());
     }
 
     private double luminance(Color color) {

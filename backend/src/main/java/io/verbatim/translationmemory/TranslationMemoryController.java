@@ -2,6 +2,7 @@ package io.verbatim.translationmemory;
 
 import io.verbatim.translationmemory.TranslationMemoryModels.CreateMemoryRequest;
 import io.verbatim.translationmemory.TranslationMemoryModels.MemoryView;
+import io.verbatim.translationmemory.TranslationMemoryModels.MemorySuggestion;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.UUID;
@@ -11,6 +12,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -36,5 +38,22 @@ public class TranslationMemoryController {
         @Valid @RequestBody CreateMemoryRequest request
     ) {
         return translationMemory.create(projectId, request);
+    }
+
+    @GetMapping("/search")
+    List<MemorySuggestion> search(
+        @PathVariable UUID projectId,
+        @RequestParam String sourceLocale,
+        @RequestParam String targetLocale,
+        @RequestParam String query,
+        @RequestParam(defaultValue = "3") int limit
+    ) {
+        return translationMemory.suggestions(
+            projectId,
+            sourceLocale,
+            targetLocale,
+            query,
+            limit
+        );
     }
 }

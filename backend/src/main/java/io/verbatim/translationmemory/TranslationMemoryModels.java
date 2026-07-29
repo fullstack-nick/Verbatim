@@ -26,4 +26,12 @@ public final class TranslationMemoryModels {
         OffsetDateTime approvedAt
     ) {
     }
+
+    public record MemorySuggestion(
+        UUID id,
+        String sourceText,
+        String targetText,
+        double similarity
+    ) {
+    }
 }

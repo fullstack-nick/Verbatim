@@ -12,6 +12,8 @@ import javax.imageio.ImageIO;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.graphics.PDXObject;
+import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
 import org.apache.pdfbox.rendering.ImageType;
 import org.apache.pdfbox.rendering.PDFRenderer;
 import org.springframework.beans.factory.annotation.Value;
@@ -40,6 +42,7 @@ public class PdfPreflightService {
             List<PreflightPage> pages = new ArrayList<>();
             int digital = 0;
             int scanned = 0;
+            int mixed = 0;
             for (int index = 0; index < pdf.getNumberOfPages(); index++) {
                 PDPage page = pdf.getPage(index);
                 List<PdfTextBlockExtractor.TextBlock> blocks =
@@ -48,11 +51,16 @@ public class PdfPreflightService {
                     blocks.stream().map(PdfTextBlockExtractor.TextBlock::text)
                         .reduce("", (left, right) -> left.isBlank() ? right : left + "\n" + right)
                 );
-                String pageType = text.length() >= 12 ? "DIGITAL" : "SCANNED";
+                boolean imageDominant = hasLargeRaster(page);
+                String pageType = text.length() < 12
+                    ? "SCANNED"
+                    : imageDominant ? "MIXED" : "DIGITAL";
                 if ("DIGITAL".equals(pageType)) {
                     digital++;
-                } else {
+                } else if ("SCANNED".equals(pageType)) {
                     scanned++;
+                } else {
+                    mixed++;
                 }
                 Path renderPath = renderDirectory.resolve("page-%04d.png".formatted(index + 1));
                 BufferedImage image = renderer.renderImageWithDPI(index, renderDpi, ImageType.RGB);
@@ -68,7 +76,7 @@ public class PdfPreflightService {
                     renderPath
                 ));
             }
-            return new PreflightResult(pdf.getNumberOfPages(), digital, scanned, 0, pages);
+            return new PreflightResult(pdf.getNumberOfPages(), digital, scanned, mixed, pages);
         } catch (IOException exception) {
             throw new ApiException(
                 HttpStatus.BAD_REQUEST,
@@ -84,6 +92,20 @@ public class PdfPreflightService {
             .replaceAll("[\\t\\x0B\\f\\r ]+", " ")
             .replaceAll("\\n{3,}", "\n\n")
             .trim();
+    }
+
+    private boolean hasLargeRaster(PDPage page) throws IOException {
+        if (page.getResources() == null) {
+            return false;
+        }
+        for (var name : page.getResources().getXObjectNames()) {
+            PDXObject object = page.getResources().getXObject(name);
+            if (object instanceof PDImageXObject image
+                && (long) image.getWidth() * image.getHeight() >= 500_000L) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private BigDecimal scale(float value) {

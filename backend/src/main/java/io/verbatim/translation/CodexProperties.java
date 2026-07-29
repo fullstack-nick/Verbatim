@@ -8,6 +8,7 @@ public record CodexProperties(
     boolean enabled,
     boolean allowFallback,
     int timeoutSeconds,
-    String translationSchema
+    String translationSchema,
+    String ocrSchema
 ) {
 }

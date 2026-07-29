@@ -21,6 +21,9 @@ import io.verbatim.translation.TranslationClient.TargetSegment;
 import io.verbatim.translation.TranslationClient.TranslationContext;
 import io.verbatim.translation.TranslationClient.TranslationResult;
 import io.verbatim.translation.TranslationGateway;
+import io.verbatim.translation.CodexVisionOcrClient;
+import io.verbatim.translation.CodexVisionOcrClient.OcrRegion;
+import io.verbatim.translation.CodexVisionOcrClient.OcrResult;
 import io.verbatim.workflow.WorkflowModels.AddInstructionRequest;
 import io.verbatim.workflow.WorkflowModels.FindingView;
 import io.verbatim.workflow.WorkflowModels.InstructionView;
@@ -29,6 +32,8 @@ import io.verbatim.workflow.WorkflowModels.RevisionView;
 import io.verbatim.workflow.WorkflowModels.StartTranslationRequest;
 import io.verbatim.workflow.WorkflowModels.StartTranslationResponse;
 import io.verbatim.workflow.WorkflowModels.UsageView;
+import io.verbatim.translationmemory.TranslationMemoryModels.CreateMemoryRequest;
+import io.verbatim.translationmemory.TranslationMemoryService;
 import java.math.BigDecimal;
 import java.nio.file.Path;
 import java.time.OffsetDateTime;
@@ -57,6 +62,8 @@ public class WorkflowService {
     private final ProjectService projects;
     private final TerminologyCacheService termCache;
     private final TranslationGateway translation;
+    private final CodexVisionOcrClient ocr;
+    private final TranslationMemoryService translationMemory;
     private final DeterministicReviewService review;
     private final PdfCompositionService compositor;
     private final StorageService storage;
@@ -68,6 +75,8 @@ public class WorkflowService {
         ProjectService projects,
         TerminologyCacheService termCache,
         TranslationGateway translation,
+        CodexVisionOcrClient ocr,
+        TranslationMemoryService translationMemory,
         DeterministicReviewService review,
         PdfCompositionService compositor,
         StorageService storage,
@@ -78,6 +87,8 @@ public class WorkflowService {
         this.projects = projects;
         this.termCache = termCache;
         this.translation = translation;
+        this.ocr = ocr;
+        this.translationMemory = translationMemory;
         this.review = review;
         this.compositor = compositor;
         this.storage = storage;
@@ -164,7 +175,7 @@ public class WorkflowService {
                 "TRANSLATE_DOCUMENT",
                 "QUEUED",
                 "QUEUED",
-                5,
+                6,
                 expectedVersion,
                 ruleVersion
             )
@@ -257,26 +268,12 @@ public class WorkflowService {
             .where(field(name("document_id"), UUID.class).eq(documentId))
             .and(field(name("target_text"), String.class).isNotNull())
             .and(field(name("target_text"), String.class).ne(""))
-            .forEach(pair -> database.insertInto(table(name("translation_memory_entry")))
-                .columns(
-                    field(name("id")),
-                    field(name("project_id")),
-                    field(name("source_locale")),
-                    field(name("target_locale")),
-                    field(name("source_text")),
-                    field(name("target_text")),
-                    field(name("approved_at"))
-                )
-                .values(
-                    UUID.randomUUID(),
-                    projectId,
-                    document.get("source_locale", String.class),
-                    document.get("target_locale", String.class),
-                    pair.get(0, String.class),
-                    pair.get(1, String.class),
-                    approvedAt
-                )
-                .execute());
+            .forEach(pair -> translationMemory.create(projectId, new CreateMemoryRequest(
+                document.get("source_locale", String.class),
+                document.get("target_locale", String.class),
+                pair.get(0, String.class),
+                pair.get(1, String.class)
+            )));
         return revision(projectId, documentId, revisionId);
     }
 
@@ -369,7 +366,9 @@ public class WorkflowService {
             throw new IllegalStateException("Document disappeared while processing.");
         }
         UUID projectId = document.get("project_id", UUID.class);
-        updateProgress(job.id(), "TRANSLATING", 1);
+        updateProgress(job.id(), "EXTRACTING_SCANNED_TEXT", 1);
+        extractScannedText(job);
+        updateProgress(job.id(), "TRANSLATING", 2);
         List<SegmentData> segments = loadSegments(job.documentId());
         List<SegmentData> translatable = segments.stream()
             .filter(item -> item.sourceText() != null && !item.sourceText().isBlank())
@@ -386,7 +385,11 @@ public class WorkflowService {
         List<Map<String, Object>> memory = loadMemory(
             projectId,
             document.get("source_locale", String.class),
-            document.get("target_locale", String.class)
+            document.get("target_locale", String.class),
+            translatable.stream()
+                .limit(8)
+                .map(SegmentData::sourceText)
+                .reduce("", (left, right) -> left + "\n" + right)
         );
         Map<String, Object> rules = new LinkedHashMap<>();
         rules.put("version", ruleSet.version());
@@ -425,7 +428,7 @@ public class WorkflowService {
                 .execute();
         }
 
-        updateProgress(job.id(), "DETERMINISTIC_REVIEW", 2);
+        updateProgress(job.id(), "DETERMINISTIC_REVIEW", 3);
         List<Finding> findings = new ArrayList<>();
         for (SegmentData segment : translatable) {
             findings.addAll(review.review(
@@ -439,7 +442,7 @@ public class WorkflowService {
         }
         saveReview(job, translatable, findings);
 
-        updateProgress(job.id(), "COMPOSING_PDF", 3);
+        updateProgress(job.id(), "COMPOSING_PDF", 4);
         Path output = storage.revisionPdf(job.documentId(), job.revisionId());
         CompositionResult composition = compositor.compose(
             storage.resolve(document.get("source_path", String.class)),
@@ -457,7 +460,7 @@ public class WorkflowService {
         );
         findings.addAll(composition.findings());
         saveLayoutFindings(job.revisionId(), composition.findings());
-        updateProgress(job.id(), "FINALIZING", 4);
+        updateProgress(job.id(), "FINALIZING", 5);
 
         String result = findings.stream().anyMatch(item -> "ERROR".equals(item.severity()))
             ? "QA_FLAGGED"
@@ -479,7 +482,7 @@ public class WorkflowService {
         database.update(table(name("workflow_job")))
             .set(field(name("state")), "COMPLETED")
             .set(field(name("current_stage")), result)
-            .set(field(name("progress_current")), 5)
+            .set(field(name("progress_current")), 6)
             .set(field(name("completed_at")), OffsetDateTime.now())
             .where(field(name("id"), UUID.class).eq(job.id()))
             .execute();
@@ -592,6 +595,129 @@ public class WorkflowService {
             ));
     }
 
+    private void extractScannedText(JobClaim job) {
+        List<PageData> pages = database.select(
+                field(name("id"), UUID.class),
+                field(name("page_number"), Integer.class),
+                field(name("width"), BigDecimal.class),
+                field(name("height"), BigDecimal.class),
+                field(name("render_path"), String.class)
+            )
+            .from(table(name("document_page")))
+            .where(field(name("document_id"), UUID.class).eq(job.documentId()))
+            .and(field(name("page_type"), String.class).in("SCANNED", "MIXED"))
+            .andExists(database.selectOne()
+                .from(table(name("segment")))
+                .where(field(name("page_id"), UUID.class).eq(field(name("document_page", "id"), UUID.class)))
+                .and(field(name("extraction_method"), String.class).eq("OCR_PENDING")))
+            .orderBy(field(name("page_number")))
+            .fetch(record -> new PageData(
+                record.get(0, UUID.class),
+                record.get(1, Integer.class),
+                record.get(2, BigDecimal.class),
+                record.get(3, BigDecimal.class),
+                record.get(4, String.class)
+            ));
+        for (PageData page : pages) {
+            OcrResult result = ocr.read(storage.resolve(page.renderPath()));
+            database.deleteFrom(table(name("segment")))
+                .where(field(name("page_id"), UUID.class).eq(page.id()))
+                .and(field(name("extraction_method"), String.class).eq("OCR_PENDING"))
+                .execute();
+            int order = 0;
+            for (OcrRegion region : result.regions()) {
+                String[] lines = region.text().split("\\R");
+                double lineHeight = region.height() / Math.max(1, lines.length);
+                for (int lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+                    String text = lines[lineIndex].trim();
+                    if (text.isBlank()) {
+                        continue;
+                    }
+                    order++;
+                    BigDecimal x = scaled(page.width(), region.x() / 1000.0);
+                    BigDecimal y = scaled(
+                        page.height(),
+                        (region.y() + lineIndex * lineHeight) / 1000.0
+                    );
+                    BigDecimal width = scaled(page.width(), region.width() / 1000.0);
+                    BigDecimal height = scaled(page.height(), lineHeight / 1000.0);
+                    database.insertInto(table(name("segment")))
+                        .columns(
+                            field(name("id")),
+                            field(name("document_id")),
+                            field(name("page_id")),
+                            field(name("block_order")),
+                            field(name("block_type")),
+                            field(name("source_text")),
+                            field(name("bounding_box")),
+                            field(name("style_json")),
+                            field(name("extraction_method")),
+                            field(name("confidence")),
+                            field(name("status"))
+                        )
+                        .values(
+                            UUID.randomUUID(),
+                            job.documentId(),
+                            page.id(),
+                            order,
+                            "TEXT",
+                            text,
+                            JSONB.valueOf("""
+                                {"x":%s,"y":%s,"width":%s,"height":%s}
+                                """.formatted(x, y, width, height).trim()),
+                            JSONB.valueOf("""
+                                {"fontFamily":"Noto Sans","fontSize":%s,"bold":%s,"fontScale":1.0,"ocr":true}
+                                """.formatted(region.fontSize(), region.bold()).trim()),
+                            "CODEX_VISION",
+                            new BigDecimal("0.90"),
+                            "NEEDS_REVIEW"
+                        )
+                        .execute();
+                }
+            }
+            saveOcrInvocation(job, page.pageNumber(), result);
+        }
+    }
+
+    private void saveOcrInvocation(JobClaim job, int pageNumber, OcrResult result) {
+        database.insertInto(table(name("ai_invocation")))
+            .columns(
+                field(name("id")),
+                field(name("document_id")),
+                field(name("revision_id")),
+                field(name("stage")),
+                field(name("batch_number")),
+                field(name("provider_thread_id")),
+                field(name("context_hash")),
+                field(name("input_tokens")),
+                field(name("cached_input_tokens")),
+                field(name("output_tokens")),
+                field(name("reasoning_output_tokens")),
+                field(name("duration_ms")),
+                field(name("state"))
+            )
+            .values(
+                UUID.randomUUID(),
+                job.documentId(),
+                job.revisionId(),
+                "OCR:CODEX_VISION",
+                pageNumber,
+                result.providerThreadId(),
+                Integer.toHexString(result.regions().hashCode()),
+                result.usage().inputTokens(),
+                result.usage().cachedInputTokens(),
+                result.usage().outputTokens(),
+                result.usage().reasoningTokens(),
+                result.durationMillis(),
+                "COMPLETED"
+            )
+            .execute();
+    }
+
+    private BigDecimal scaled(BigDecimal dimension, double fraction) {
+        return dimension.multiply(BigDecimal.valueOf(fraction)).setScale(2, java.math.RoundingMode.HALF_UP);
+    }
+
     private List<String> loadInstructions(UUID documentId, UUID revisionId) {
         return database.select(field(name("message"), String.class))
             .from(table(name("revision_instruction")))
@@ -607,22 +733,20 @@ public class WorkflowService {
     private List<Map<String, Object>> loadMemory(
         UUID projectId,
         String sourceLocale,
-        String targetLocale
+        String targetLocale,
+        String sourceText
     ) {
-        return database.select(
-                field(name("source_text"), String.class),
-                field(name("target_text"), String.class)
-            )
-            .from(table(name("translation_memory_entry")))
-            .where(field(name("project_id"), UUID.class).eq(projectId))
-            .and(field(name("source_locale"), String.class).eq(sourceLocale))
-            .and(field(name("target_locale"), String.class).eq(targetLocale))
-            .orderBy(field(name("approved_at")).desc())
-            .limit(20)
-            .fetch(record -> Map.of(
-                "source", record.get(0, String.class),
-                "target", record.get(1, String.class)
-            ));
+        return translationMemory.suggestions(
+            projectId,
+            sourceLocale,
+            targetLocale,
+            sourceText,
+            3
+        ).stream().map(suggestion -> Map.<String, Object>of(
+            "source", suggestion.sourceText(),
+            "target", suggestion.targetText(),
+            "similarity", suggestion.similarity()
+        )).toList();
     }
 
     private void saveInvocation(JobClaim job, TranslationResult translated) {
@@ -865,6 +989,15 @@ public class WorkflowService {
         String boundingBox,
         String style,
         int pageNumber,
+        String renderPath
+    ) {
+    }
+
+    private record PageData(
+        UUID id,
+        int pageNumber,
+        BigDecimal width,
+        BigDecimal height,
         String renderPath
     ) {
     }
