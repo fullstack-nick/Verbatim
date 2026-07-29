@@ -1,0 +1,31 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: verbatim
+      POSTGRES_PASSWORD: verbatim
+      POSTGRES_USER: verbatim
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U verbatim -d verbatim"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - verbatim-postgres:/var/lib/postgresql/data
+  redis:
+    image: redis:7.4-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - verbatim-redis:/data
+
+volumes:
+  verbatim-postgres:
+  verbatim-redis:

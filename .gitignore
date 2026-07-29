@@ -35,6 +35,7 @@ __pycache__/
 datasets/
 
 # Playwright artifacts
+.playwright-cli/
 output/playwright/
 playwright-report/
 test-results/

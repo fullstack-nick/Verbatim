@@ -1,0 +1,4 @@
+interface:
+  display_name: "Verbatim PDF Layout"
+  short_description: "Render and verify translated PDF layout"
+  default_prompt: "Use $verbatim-pdf-layout to render and verify this translated PDF revision."

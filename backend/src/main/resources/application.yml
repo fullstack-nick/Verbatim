@@ -1,0 +1,52 @@
+spring:
+  application:
+    name: Verbatim
+  datasource:
+    url: ${VERBATIM_DATABASE_URL:jdbc:postgresql://localhost:5432/verbatim}
+    username: ${VERBATIM_DATABASE_USER:verbatim}
+    password: ${VERBATIM_DATABASE_PASSWORD:verbatim}
+  flyway:
+    locations: classpath:db/migration
+  jooq:
+    sql-dialect: postgres
+  data:
+    redis:
+      host: ${VERBATIM_REDIS_HOST:localhost}
+      port: ${VERBATIM_REDIS_PORT:6379}
+  docker:
+    compose:
+      file: compose.yaml
+      lifecycle-management: start-only
+  servlet:
+    multipart:
+      max-file-size: 250MB
+      max-request-size: 250MB
+
+server:
+  port: ${VERBATIM_PORT:8080}
+  error:
+    include-message: always
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+
+verbatim:
+  storage:
+    root: ${VERBATIM_DATA_DIR:../.verbatim-data}
+  workflow:
+    poll-delay: 1000
+    max-attempts: 3
+  codex:
+    executable: ${VERBATIM_CODEX_EXECUTABLE:codex}
+    enabled: ${VERBATIM_CODEX_ENABLED:true}
+  pdf:
+    render-dpi: 160
+    minimum-font-scale: 0.78
