@@ -16,6 +16,9 @@ Follow this workflow for every meaningful PDF change.
 
 ## Render
 
+Use `scripts/render_pdf.py <pdf> <output-directory> --dpi 160` when PyMuPDF is
+available. Otherwise use the repository's configured Poppler or application renderer.
+
 1. Render source and target pages at the same DPI and color settings.
 2. Render all changed pages plus the page before and after each changed page.
 3. For a new pipeline or cross-document change, render the complete fixture.

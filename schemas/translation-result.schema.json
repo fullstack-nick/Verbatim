@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["translations"],
+  "properties": {
+    "translations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["segmentId", "targetText"],
+        "properties": {
+          "segmentId": {
+            "type": "string"
+          },
+          "targetText": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

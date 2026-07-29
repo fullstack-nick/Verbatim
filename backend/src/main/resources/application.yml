@@ -23,7 +23,7 @@ spring:
       max-request-size: 250MB
 
 server:
-  port: ${VERBATIM_PORT:8080}
+  port: ${VERBATIM_PORT:8081}
   error:
     include-message: always
 
@@ -47,6 +47,9 @@ verbatim:
   codex:
     executable: ${VERBATIM_CODEX_EXECUTABLE:codex}
     enabled: ${VERBATIM_CODEX_ENABLED:true}
+    allow-fallback: ${VERBATIM_CODEX_ALLOW_FALLBACK:true}
+    timeout-seconds: ${VERBATIM_CODEX_TIMEOUT_SECONDS:300}
+    translation-schema: ${VERBATIM_TRANSLATION_SCHEMA:../schemas/translation-result.schema.json}
   pdf:
     render-dpi: 160
     minimum-font-scale: 0.78

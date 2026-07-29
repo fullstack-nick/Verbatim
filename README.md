@@ -39,7 +39,7 @@ $env:JAVA_HOME = (Resolve-Path .tooling/jdk-25).Path
 backend/mvnw.cmd -f backend/pom.xml spring-boot:run
 ```
 
-Swagger UI is available at `http://localhost:8080/swagger-ui.html`.
+Swagger UI is available at `http://localhost:8081/swagger-ui.html`.
 
 ## Start the frontend
 
